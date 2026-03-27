@@ -4,15 +4,11 @@ const Revision = require('../models/Revision');
 // @route   GET /api/revisions
 const getRevisions = async (req, res) => {
   try {
+    // Use Asia/Kolkata timezone for Indian users to avoid UTC lag
     const now = new Date();
-    // Use local time for date string to avoid timezone lag in UTC (like +05:30)
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const todayStr = `${year}-${month}-${day}`;
-    
-    const startOfToday = new Date(todayStr);
-    const endOfToday = new Date(todayStr);
+    const istDateStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // "YYYY-MM-DD"
+    const startOfToday = new Date(istDateStr);
+    const endOfToday = new Date(istDateStr);
     endOfToday.setHours(23, 59, 59, 999);
 
     let todayRevision = await Revision.findOne({ 

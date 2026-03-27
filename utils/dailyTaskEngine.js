@@ -11,9 +11,15 @@ const runDailyTaskGeneration = async () => {
     console.log('[TaskEngine] Initiating daily generation sequence...');
     
     const users = await User.find({});
-    const today = new Date();
+    const now = new Date();
+    const istDateStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // "YYYY-MM-DD"
+    const today = new Date(istDateStr);
     today.setHours(0, 0, 0, 0);
-    const dayNum = today.getDay(); // 0 is Sunday, 6 is Saturday
+
+    // Get the correct day of week in IST to determine if it's Quiz time (Saturday/Sunday)
+    const istDayStr = now.toLocaleDateString("en-US", { weekday: 'long', timeZone: "Asia/Kolkata" });
+    const dayNumMap = { 'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6 };
+    const dayNum = dayNumMap[istDayStr];
 
     const stats = {
         usersProcessed: 0,

@@ -4,9 +4,11 @@ const DPP = require('../models/DPP');
 // @route   GET /api/dpp
 const getDPPs = async (req, res) => {
   try {
-    const todayStr = new Date().toISOString().split('T')[0];
-    const startOfToday = new Date(todayStr);
-    const endOfToday = new Date(todayStr);
+    // Use Asia/Kolkata timezone for Indian users to avoid UTC lag
+    const now = new Date();
+    const istDateStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // "YYYY-MM-DD"
+    const startOfToday = new Date(istDateStr);
+    const endOfToday = new Date(istDateStr);
     endOfToday.setHours(23, 59, 59, 999);
 
     let todayDPP = await DPP.findOne({ 
