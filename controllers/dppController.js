@@ -4,16 +4,18 @@ const DPP = require('../models/DPP');
 // @route   GET /api/dpp
 const getDPPs = async (req, res) => {
   try {
-    // Use Asia/Kolkata timezone for Indian users to avoid UTC lag
+    const { status, subjectId, chapterId } = req.query;
+
+    // Ensure today's DPP exists (IST-aware)
     const now = new Date();
-    const istDateStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // "YYYY-MM-DD"
+    const istDateStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
     const startOfToday = new Date(istDateStr);
     const endOfToday = new Date(istDateStr);
     endOfToday.setHours(23, 59, 59, 999);
 
-    let todayDPP = await DPP.findOne({ 
-      user: req.user._id, 
-      date: { $gte: startOfToday, $lte: endOfToday } 
+    const todayDPP = await DPP.findOne({
+      user: req.user._id,
+      date: { $gte: startOfToday, $lte: endOfToday }
     });
 
     if (!todayDPP) {
@@ -24,7 +26,22 @@ const getDPPs = async (req, res) => {
       });
     }
 
-    const dpps = await DPP.find({ user: req.user._id })
+    // Build dynamic filter
+    const filter = { user: req.user._id };
+
+    if (status && status !== 'all') {
+      filter.status = status;
+    }
+
+    if (subjectId && subjectId !== 'all') {
+      const tagMatch = { subject: subjectId };
+      if (chapterId && chapterId !== 'all') {
+        tagMatch.chapter = chapterId;
+      }
+      filter.tags = { $elemMatch: tagMatch };
+    }
+
+    const dpps = await DPP.find(filter)
       .populate('tags.subject tags.chapter tags.topic')
       .sort({ date: -1 });
 
@@ -33,6 +50,7 @@ const getDPPs = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 
 // @desc    Update or create a DPP for a date

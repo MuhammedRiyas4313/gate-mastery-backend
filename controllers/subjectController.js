@@ -194,8 +194,18 @@ const deleteTopic = async (req, res) => {
   }
 };
 
+const getChapters = async (req, res) => {
+  try {
+    const chapters = await Chapter.find({ subject: req.params.subjectId }).sort({ orderIndex: 1 });
+    res.json(chapters);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getSubjects, addSubject, updateSubject, deleteSubject,
   addChapter, updateChapter, deleteChapter,
-  addTopic, updateTopic, deleteTopic
+  addTopic, updateTopic, deleteTopic,
+  getChapters
 };

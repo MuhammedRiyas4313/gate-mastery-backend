@@ -7,6 +7,9 @@ const PYQ = require('../models/PYQ');
 const TestSeries = require('../models/TestSeries');
 const QuizSession = require('../models/QuizSession');
 const Exam = require('../models/Exam');
+const { trackAttendance } = require('../utils/attendanceTracker');
+
+
 
 const getDashboard = async (req, res) => {
   try {
@@ -15,6 +18,10 @@ const getDashboard = async (req, res) => {
     const endOfToday = new Date(today);
     endOfToday.setHours(23, 59, 59, 999);
 
+    // 0. Attendance & Streak Calculation
+    const streak = await trackAttendance(req.user._id);
+
+
     // 8. Upcoming Exams & Dynaimc Countdown
     const exams = await Exam.find({ user: req.user._id, active: true }).sort({ date: 1 });
     const primaryExam = exams[0];
@@ -22,39 +29,48 @@ const getDashboard = async (req, res) => {
       ? Math.ceil((new Date(primaryExam.date) - new Date()) / (1000 * 60 * 60 * 24))
       : 316; // Maintain 316 as fallback for now if no exam added
 
+    // 7. Subject Progress (Need subjectIds for topics)
+    const subjects = await Subject.find({ user: req.user._id });
+    const subjectIds = subjects.map(s => s._id);
+
     // 1. Topics handled today
     const topicsCompletedToday = await Topic.find({
-      user: req.user._id,
+      subject: { $in: subjectIds },
       updatedAt: { $gte: today, $lte: endOfToday },
       status: 'complete'
     }).populate('subject chapter');
 
-    // 2. Revisions today (Fix populate paths)
+
+    // 2. Revisions due (Include all pending backlog)
     const revisionsToday = await Revision.find({
       user: req.user._id,
-      date: { $gte: today, $lte: endOfToday }
+      date: { $lte: endOfToday },
+      status: { $in: ['PENDING', 'ONGOING'] }
     }).populate('tags.subject tags.chapter tags.topic');
 
-    // 3. DPP today
+    // 3. DPP today or pending
     const dppToday = await DPP.findOne({
       user: req.user._id,
-      date: { $gte: today, $lte: endOfToday }
+      date: { $lte: endOfToday },
+      status: { $in: ['PENDING', 'ONGOING'] }
     }).populate('tags.subject tags.chapter tags.topic');
 
-    // 4. PYQs today
+    // 4. PYQs today or pending
     const pyqsToday = await PYQ.find({
       user: req.user._id,
       $or: [
-        { date: { $gte: today, $lte: endOfToday } },
+        { date: { $lte: endOfToday }, status: { $ne: 'COMPLETED' } },
         { updatedAt: { $gte: today, $lte: endOfToday } }
       ]
     }).populate('subject chapter topic');
 
-    // 5. Test Series
+    // 5. Test Series today or pending
     const testsToday = await TestSeries.find({
       user: req.user._id,
-      date: { $gte: today, $lte: endOfToday }
+      date: { $lte: endOfToday },
+      status: { $in: ['PENDING', 'ONGOING'] }
     }).populate('subject chapter');
+
 
     // 6. Recent Quiz Sessions (Last 5 for velocity chart)
     const recentQuizzes = await QuizSession.find({ user: req.user._id })
@@ -68,7 +84,6 @@ const getDashboard = async (req, res) => {
     });
 
     // 7. Subject Progress
-    const subjects = await Subject.find({ user: req.user._id });
     const subjectProgress = await Promise.all(subjects.map(async (sub) => {
       const chapters = await Chapter.find({ subject: sub._id });
       const totalChapters = chapters.length;
@@ -95,11 +110,14 @@ const getDashboard = async (req, res) => {
       testsToday,
       weekendQuiz,
       recentQuizzes,
+      streak,
       subjectProgress,
+
       upcomingExams: exams.map(e => ({
         ...e._doc,
         daysLeft: Math.ceil((new Date(e.date) - new Date()) / (1000 * 60 * 60 * 24))
-      }))
+      })),
+      user: { name: req.user.name, email: req.user.email }
     });
 
   } catch (error) {

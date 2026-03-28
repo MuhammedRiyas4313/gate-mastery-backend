@@ -4,7 +4,21 @@ const PYQ = require('../models/PYQ');
 // @route   GET /api/pyqs
 const getPYQs = async (req, res) => {
   try {
-    const pyqs = await PYQ.find({ user: req.user._id })
+    const { status, subjectId, chapterId } = req.query;
+
+    const filter = { user: req.user._id };
+
+    if (status && status !== 'all') {
+      filter.status = status;
+    }
+    if (subjectId && subjectId !== 'all') {
+      filter.subject = subjectId;
+    }
+    if (chapterId && chapterId !== 'all') {
+      filter.chapter = chapterId;
+    }
+
+    const pyqs = await PYQ.find(filter)
       .populate('subject chapter topic')
       .sort({ createdAt: -1 });
     res.json(pyqs);

@@ -15,6 +15,8 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static('uploads'));
+app.use('/api/uploads', express.static('uploads')); // accommodate frontend base URIs
 
 app.get('/', (req, res) => {
   res.send('GATE Mastery API is running...');
@@ -36,6 +38,9 @@ const examRoutes = require('./routes/examRoutes');
 
 const cronRoutes = require('./routes/cronRoutes');
 
+const timerRoutes = require('./routes/timerRoutes');
+const scheduleRoutes = require('./routes/scheduleRoutes');
+
 app.use('/api/users', userRoutes);
 app.use('/api/subjects', subjectRoutes);
 app.use('/api/revisions', revisionRoutes);
@@ -48,7 +53,8 @@ app.use('/api/quiz-sessions', quizSessionRoutes);
 app.use('/api/test-series', testSeriesRoutes);
 app.use('/api/exams', examRoutes);
 app.use('/api/cron', cronRoutes);
-
+app.use('/api/timer', timerRoutes);
+app.use('/api/schedules', scheduleRoutes);
 
 
 

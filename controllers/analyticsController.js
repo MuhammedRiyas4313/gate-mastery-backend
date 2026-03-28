@@ -4,10 +4,19 @@ const Revision = require('../models/Revision');
 const PYQ = require('../models/PYQ');
 const TestSeries = require('../models/TestSeries');
 const QuizSession = require('../models/QuizSession');
+const DPP = require('../models/DPP');
+
+
+const { trackAttendance } = require('../utils/attendanceTracker');
+
 
 const getAnalytics = async (req, res) => {
   try {
     const userId = req.user._id;
+
+    // 0. Attendance & Streak Calculation
+    const streakResult = await trackAttendance(userId);
+    const streak = streakResult || 0;
 
     // 1. Subject Progress & Readiness
     const subjects = await Subject.find({ user: userId });
@@ -57,14 +66,20 @@ const getAnalytics = async (req, res) => {
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setDate(sixMonthsAgo.getDate() - 168);
 
-    const [revActivities, pyqActivities, testActivities, quizActivities] = await Promise.all([
+    const subjectIds = subjects.map(s => s._id);
+
+    const [revActivities, pyqActivities, testActivities, quizActivities, topicActivities, dppActivities] = await Promise.all([
       Revision.find({ user: userId, updatedAt: { $gte: sixMonthsAgo }, status: 'COMPLETED' }),
       PYQ.find({ user: userId, updatedAt: { $gte: sixMonthsAgo }, status: 'COMPLETED' }),
       TestSeries.find({ user: userId, updatedAt: { $gte: sixMonthsAgo }, status: 'COMPLETED' }),
-      QuizSession.find({ user: userId, updatedAt: { $gte: sixMonthsAgo }, status: 'COMPLETED' })
+      QuizSession.find({ user: userId, updatedAt: { $gte: sixMonthsAgo }, status: 'COMPLETED' }),
+      Topic.find({ subject: { $in: subjectIds }, updatedAt: { $gte: sixMonthsAgo }, status: 'complete' }),
+      DPP.find({ user: userId, updatedAt: { $gte: sixMonthsAgo }, status: 'COMPLETED' })
     ]);
 
+
     const activityMap = {};
+
     const processItems = (items) => items.forEach(item => {
       const dateSource = item.updatedAt || item.date || item.createdAt;
       if (!dateSource) return;
@@ -76,6 +91,9 @@ const getAnalytics = async (req, res) => {
     processItems(pyqActivities);
     processItems(testActivities);
     processItems(quizActivities);
+    processItems(topicActivities);
+    processItems(dppActivities);
+
 
     const activityHeatmap = Object.keys(activityMap).map(date => ({
       date,
@@ -88,7 +106,8 @@ const getAnalytics = async (req, res) => {
       subjectProgress,
       revisionBySlot,
       pyqByDifficulty,
-      activityHeatmap
+      activityHeatmap,
+      streak
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
