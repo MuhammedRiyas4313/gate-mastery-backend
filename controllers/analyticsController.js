@@ -26,16 +26,16 @@ const getAnalytics = async (req, res) => {
     const subjectProgress = await Promise.all(subjects.map(async (sub) => {
       const totalTopics = await Topic.countDocuments({ subject: sub._id });
       const doneTopics = await Topic.countDocuments({ subject: sub._id, status: 'complete' });
-      
+
       totalTopicsCount += totalTopics;
       totalDoneTopicsCount += doneTopics;
 
       return {
-        subject: { 
-          id: sub._id, 
-          name: sub.name, 
-          icon: sub.icon, 
-          color: sub.color || 'hsl(var(--primary))' 
+        subject: {
+          id: sub._id,
+          name: sub.name,
+          icon: sub.icon,
+          color: sub.color || 'hsl(var(--primary))'
         },
         totalTopics,
         doneTopics,

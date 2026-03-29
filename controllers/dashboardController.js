@@ -1,3 +1,5 @@
+const mongoose = require('mongoose');
+const User = require('../models/User');
 const Subject = require('../models/Subject');
 const Chapter = require('../models/Chapter');
 const Topic = require('../models/Topic');
@@ -8,116 +10,310 @@ const TestSeries = require('../models/TestSeries');
 const QuizSession = require('../models/QuizSession');
 const Exam = require('../models/Exam');
 const { trackAttendance } = require('../utils/attendanceTracker');
-
-
+const { autoGenerateQuizSessions } = require('../utils/quizGenerator');
 
 const getDashboard = async (req, res) => {
   try {
-    const today = new Date();
+    const userId = new mongoose.Types.ObjectId(req.user._id);
+
+    // 0. High-Priority: Ensure Quiz Sessions are Auto-Generated
+    await autoGenerateQuizSessions(userId);
+    
+    // Set up IST-aware today and endOfToday
+    const today = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
     today.setHours(0, 0, 0, 0);
     const endOfToday = new Date(today);
     endOfToday.setHours(23, 59, 59, 999);
 
-    // 0. Attendance & Streak Calculation
-    const streak = await trackAttendance(req.user._id);
+    // 1. Update Attendance & Streak
+    const streak = await trackAttendance(userId);
 
+    // 2. Dashboard Aggregation
+    const results = await User.aggregate([
+      { $match: { _id: userId } },
+      {
+        $facet: {
+          // Upcoming Exams
+          upcomingExams: [
+            {
+              $lookup: {
+                from: 'exams',
+                let: { uId: userId },
+                pipeline: [
+                   { $match: { $expr: { $and: [{ $eq: ['$user', '$$uId'] }, { $eq: ['$active', true] }] } } },
+                   { $sort: { date: 1 } }
+                ],
+                as: 'exams'
+              }
+            },
+            { $unwind: '$exams' },
+            { $replaceRoot: { newRoot: '$exams' } },
+            {
+              $addFields: {
+                daysLeft: {
+                  $ceil: {
+                    $divide: [
+                      { $subtract: ['$date', new Date()] },
+                      1000 * 60 * 60 * 24
+                    ]
+                  }
+                }
+              }
+            }
+          ],
 
-    // 8. Upcoming Exams & Dynaimc Countdown
-    const exams = await Exam.find({ user: req.user._id, active: true }).sort({ date: 1 });
-    const primaryExam = exams[0];
-    const gateCountdownDays = primaryExam 
-      ? Math.ceil((new Date(primaryExam.date) - new Date()) / (1000 * 60 * 60 * 24))
-      : 316; // Maintain 316 as fallback for now if no exam added
+          // Subject Progress
+          subjectProgress: [
+            {
+              $lookup: {
+                from: 'subjects',
+                let: { uId: userId },
+                pipeline: [
+                   { $match: { $expr: { $eq: ['$user', '$$uId'] } } }
+                ],
+                as: 'subs'
+              }
+            },
+            { $unwind: '$subs' },
+            {
+              $lookup: {
+                from: 'chapters',
+                localField: 'subs._id',
+                foreignField: 'subject',
+                as: 'chaps'
+              }
+            },
+            {
+              $project: {
+                _id: '$subs._id',
+                name: '$subs.name',
+                color: '$subs.color',
+                icon: { $ifNull: ['$subs.icon', '📚'] },
+                totalChapters: { $size: { $ifNull: ['$chaps', []] } },
+                completedChapters: {
+                  $size: {
+                    $filter: {
+                      input: { $ifNull: ['$chaps', []] },
+                      as: 'chap',
+                      cond: { $eq: ['$$chap.status', 'complete'] }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              $addFields: {
+                percent: {
+                  $cond: {
+                    if: { $gt: ['$totalChapters', 0] },
+                    then: { $round: [{ $multiply: [{ $divide: ['$completedChapters', '$totalChapters'] }, 100] }, 0] },
+                    else: 0
+                  }
+                }
+              }
+            }
+          ],
 
-    // 7. Subject Progress (Need subjectIds for topics)
-    const subjects = await Subject.find({ user: req.user._id });
-    const subjectIds = subjects.map(s => s._id);
+          // Pending Activities
+          pendingActivities: [
+            {
+              $lookup: {
+                from: 'revisions',
+                let: { uId: userId },
+                pipeline: [
+                  { $match: { $expr: { $and: [
+                    { $eq: ['$user', '$$uId'] }, 
+                    { $in: ['$status', ['PENDING', 'ONGOING', 'SNOOZED']] }
+                  ] } } }
+                ],
+                as: 'revisions'
+              }
+            },
+            {
+              $lookup: {
+                from: 'dpps',
+                let: { uId: userId },
+                pipeline: [
+                  { $match: { $expr: { $and: [
+                    { $eq: ['$user', '$$uId'] }, 
+                    { $in: ['$status', ['PENDING', 'ONGOING']] }
+                  ] } } }
+                ],
+                as: 'dpps'
+              }
+            },
+            {
+              $lookup: {
+                from: 'pyqs',
+                let: { uId: userId },
+                pipeline: [
+                  { $match: { $expr: { $and: [
+                    { $eq: ['$user', '$$uId'] }, 
+                    { $ne: ['$status', 'COMPLETED'] }
+                  ] } } }
+                ],
+                as: 'pyqs'
+              }
+            },
+            {
+              $lookup: {
+                from: 'testseries',
+                let: { uId: userId },
+                pipeline: [
+                  { $match: { $expr: { $and: [
+                    { $eq: ['$user', '$$uId'] }, 
+                    { $in: ['$status', ['PENDING', 'ONGOING']] }
+                  ] } } }
+                ],
+                as: 'tests'
+              }
+            },
+            {
+              $lookup: {
+                from: 'quizsessions',
+                let: { uId: userId },
+                pipeline: [
+                  { $match: { $expr: { $and: [
+                    { $eq: ['$user', '$$uId'] }, 
+                    { $in: ['$status', ['PENDING', 'ONGOING']] }
+                  ] } } }
+                ],
+                as: 'quizSessions'
+              }
+            },
+            {
+              $project: {
+                revisionsCount: {
+                  $reduce: {
+                    input: { $ifNull: ['$revisions', []] },
+                    initialValue: 0,
+                    in: { 
+                       $add: [
+                          '$$value', 
+                          { $max: [1, { $size: { $ifNull: ['$$this.tags', []] } }] }
+                       ] 
+                    }
+                  }
+                },
+                dppsCount: { $size: { $ifNull: ['$dpps', []] } },
+                pyqsCount: { $size: { $ifNull: ['$pyqs', []] } },
+                testsCount: { $size: { $ifNull: ['$tests', []] } },
+                quizzesCount: { $size: { $ifNull: ['$quizSessions', []] } },
+                totalPending: {
+                  $add: [
+                    {
+                      $reduce: {
+                        input: { $ifNull: ['$revisions', []] },
+                        initialValue: 0,
+                        in: { 
+                           $add: [
+                              '$$value', 
+                              { $max: [1, { $size: { $ifNull: ['$$this.tags', []] } }] }
+                           ] 
+                        }
+                      }
+                    }, 
+                    { $size: { $ifNull: ['$dpps', []] } }, 
+                    { $size: { $ifNull: ['$pyqs', []] } }, 
+                    { $size: { $ifNull: ['$tests', []] } }, 
+                    { $size: { $ifNull: ['$quizSessions', []] } }
+                  ]
+                }
+              }
+            }
+          ],
 
-    // 1. Topics handled today
-    const topicsCompletedToday = await Topic.find({
-      subject: { $in: subjectIds },
-      updatedAt: { $gte: today, $lte: endOfToday },
-      status: 'complete'
-    }).populate('subject chapter');
+          // Topics completed today
+          topicsCompletedToday: [
+            {
+              $lookup: {
+                from: 'subjects',
+                let: { uId: userId },
+                pipeline: [
+                  { $match: { $expr: { $eq: ['$user', '$$uId'] } } }
+                ],
+                as: 'subs'
+              }
+            },
+            { $unwind: '$subs' },
+            {
+              $lookup: {
+                from: 'topics',
+                let: { subId: '$subs._id', start: today, end: endOfToday },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: {
+                        $and: [
+                          { $eq: ['$subject', '$$subId'] },
+                          { $gte: ['$updatedAt', '$$start'] },
+                          { $lte: ['$updatedAt', '$$end'] },
+                          { $eq: ['$status', 'complete'] }
+                        ]
+                      }
+                    }
+                  }
+                ],
+                as: 'todaysTopics'
+              }
+            },
+            { $unwind: '$todaysTopics' },
+            { $replaceRoot: { newRoot: '$todaysTopics' } }
+          ],
 
+          user: [ { $project: { name: 1, email: 1 } } ]
+        }
+      }
+    ]);
 
-    // 2. Revisions due (Include all pending backlog)
-    const revisionsToday = await Revision.find({
-      user: req.user._id,
-      date: { $lte: endOfToday },
-      status: { $in: ['PENDING', 'ONGOING'] }
-    }).populate('tags.subject tags.chapter tags.topic');
+    const dashboardData = results[0];
+    const upcomingExams = dashboardData?.upcomingExams || [];
+    const primaryExam = upcomingExams[0];
+    const gateCountdownDays = primaryExam ? primaryExam.daysLeft : 316;
 
-    // 3. DPP today or pending
-    const dppToday = await DPP.findOne({
-      user: req.user._id,
-      date: { $lte: endOfToday },
-      status: { $in: ['PENDING', 'ONGOING'] }
-    }).populate('tags.subject tags.chapter tags.topic');
+    // 3. Activity Heatmap
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setDate(sixMonthsAgo.getDate() - 168);
 
-    // 4. PYQs today or pending
-    const pyqsToday = await PYQ.find({
-      user: req.user._id,
-      $or: [
-        { date: { $lte: endOfToday }, status: { $ne: 'COMPLETED' } },
-        { updatedAt: { $gte: today, $lte: endOfToday } }
-      ]
-    }).populate('subject chapter topic');
+    const [revActivities, pyqActivities, testActivities, topicActivities, dppActivities] = await Promise.all([
+      Revision.find({ user: userId, updatedAt: { $gte: sixMonthsAgo }, status: 'COMPLETED' }),
+      PYQ.find({ user: userId, updatedAt: { $gte: sixMonthsAgo }, status: 'COMPLETED' }),
+      TestSeries.find({ user: userId, updatedAt: { $gte: sixMonthsAgo }, status: 'COMPLETED' }),
+      Topic.find({ subject: { $in: (dashboardData?.subjectProgress || []).map(s => s._id) }, updatedAt: { $gte: sixMonthsAgo }, status: 'complete' }),
+      DPP.find({ user: userId, updatedAt: { $gte: sixMonthsAgo }, status: 'COMPLETED' })
+    ]);
 
-    // 5. Test Series today or pending
-    const testsToday = await TestSeries.find({
-      user: req.user._id,
-      date: { $lte: endOfToday },
-      status: { $in: ['PENDING', 'ONGOING'] }
-    }).populate('subject chapter');
-
-
-    // 6. Recent Quiz Sessions (Last 5 for velocity chart)
-    const recentQuizzes = await QuizSession.find({ user: req.user._id })
-      .sort({ date: -1 })
-      .limit(5)
-      .populate('quizzes.subject quizzes.chapter quizzes.topic');
-
-    const weekendQuiz = recentQuizzes.find(q => {
-       const qDate = new Date(q.date);
-       return qDate.setHours(0,0,0,0) === today.getTime();
+    const activityMap = {};
+    const processItems = (items) => items.forEach(item => {
+      const dateSource = item.updatedAt || item.date || item.createdAt;
+      const day = new Date(dateSource).toISOString().split('T')[0];
+      activityMap[day] = (activityMap[day] || 0) + 1;
     });
 
-    // 7. Subject Progress
-    const subjectProgress = await Promise.all(subjects.map(async (sub) => {
-      const chapters = await Chapter.find({ subject: sub._id });
-      const totalChapters = chapters.length;
-      const completedChapters = chapters.filter(c => c.status === 'complete').length;
+    [revActivities, pyqActivities, testActivities, topicActivities, dppActivities].forEach(processItems);
 
-      return {
-        _id: sub._id,
-        name: sub.name,
-        color: sub.color,
-        icon: sub.icon || '📚',
-        totalChapters,
-        completedChapters,
-        percent: totalChapters > 0 ? Math.round((completedChapters / totalChapters) * 100) : 0
-      };
+    const activityHeatmap = Object.keys(activityMap).map(date => ({
+      date,
+      count: activityMap[date],
+      level: Math.min(Math.ceil(activityMap[date] / 2), 4)
     }));
 
     res.json({
       todayISO: today.toISOString(),
       gateCountdownDays: gateCountdownDays > 0 ? gateCountdownDays : 0,
-      topicsCompletedToday,
-      revisionsToday,
-      dppToday,
-      pyqsToday,
-      testsToday,
-      weekendQuiz,
-      recentQuizzes,
       streak,
-      subjectProgress,
-
-      upcomingExams: exams.map(e => ({
-        ...e._doc,
-        daysLeft: Math.ceil((new Date(e.date) - new Date()) / (1000 * 60 * 60 * 24))
-      })),
-      user: { name: req.user.name, email: req.user.email }
+      upcomingExams: dashboardData?.upcomingExams || [],
+      subjectProgress: dashboardData?.subjectProgress || [],
+      pendingSummary: dashboardData?.pendingActivities[0] || { totalPending: 0, revisionsCount: 0, dppsCount: 0, pyqsCount: 0, testsCount: 0, quizzesCount: 0 },
+      topicsCompletedToday: dashboardData?.topicsCompletedToday || [],
+      user: dashboardData?.user[0] || { name: 'Commander' },
+      activityHeatmap,
+      
+      revisionsToday: await Revision.find({ user: userId, date: { $lte: endOfToday }, status: { $in: ['PENDING', 'ONGOING', 'SNOOZED'] } }).limit(10).populate('tags.subject tags.chapter tags.topic'),
+      dppsToday: await DPP.find({ user: userId, date: { $lte: endOfToday }, status: { $in: ['PENDING', 'ONGOING'] } }).limit(5).populate('tags.subject tags.chapter tags.topic'),
+      pyqsToday: await PYQ.find({ user: userId, $or: [{ date: { $lte: endOfToday }, status: { $ne: 'COMPLETED' } }, { updatedAt: { $gte: today, $lte: endOfToday } }] }).limit(5).populate('subject chapter topic'),
+      testsToday: await TestSeries.find({ user: userId, date: { $lte: endOfToday }, status: { $in: ['PENDING', 'ONGOING'] } }).limit(5).populate('subject chapter'),
+      quizzesToday: await QuizSession.find({ user: userId, date: { $lte: endOfToday }, status: { $in: ['PENDING', 'ONGOING'] } }).limit(5).populate('quizzes.subject quizzes.chapter quizzes.topic')
     });
 
   } catch (error) {
