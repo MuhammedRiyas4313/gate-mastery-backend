@@ -48,150 +48,158 @@ const saveSession = async (req, res) => {
 // @route   GET /api/timer/stats
 const getStats = async (req, res) => {
   try {
-    const subjects = await Subject.find({ user: req.user._id })
-      .select('name icon color')
-      .lean();
-    
-    const chapters = await Chapter.find({ user: req.user._id })
-      .select('name subject')
-      .lean();
+    const userId = req.user._id;
+
+    // 1. Fetch metadata lookups (fast maps for hydration)
+    const subjects = await Subject.find({ user: userId }).select('name icon color').lean();
+    const subjectIds = subjects.map(s => s._id);
+    const chapters = await Chapter.find({ subject: { $in: subjectIds } }).select('name subject').lean();
 
     const subjectMap = {};
     const chapterMap = {};
+    subjects.forEach(s => subjectMap[s._id.toString()] = s);
+    chapters.forEach(c => chapterMap[c._id.toString()] = c.name);
 
-    subjects.forEach(s => {
-      subjectMap[s._id.toString()] = { ...s };
-    });
+    // 2. Perform high-performance aggregation
+    const aggregationResults = await StudySession.aggregate([
+      { $match: { user: userId } },
+      {
+        $facet: {
+          // Daily grouped by date, subject, and chapter
+          daily: [
+            {
+              $group: {
+                _id: {
+                  date: { $dateToString: { format: "%Y-%m-%d", date: "$startTime", timezone: "+05:30" } },
+                  subject: "$subject",
+                  chapter: "$chapter"
+                },
+                duration: { $sum: "$duration" }
+              }
+            },
+            { $sort: { "_id.date": -1 } }
+          ],
+          // All sessions (not grouped) for total sums and logs
+          sessions: [
+            { $sort: { startTime: -1 } },
+            { $limit: 100 } // Limit slightly more for safety
+          ]
+        }
+      }
+    ]);
 
-    chapters.forEach(c => {
-      chapterMap[c._id.toString()] = c.name;
-    });
+    const { daily, sessions: rawSessions } = aggregationResults[0];
 
-    const sessions = await StudySession.find({ user: req.user._id }).lean();
-
+    // 3. Process Daily and AllTime stats
     const dailyMap = {};
-    sessions.forEach(session => {
-        // Ensure local date formatting roughly matches user expectations
-        const validTime = session.startTime || session.createdAt || new Date();
-        const d = new Date(validTime);
-        if (isNaN(d.getTime())) { d.setTime(Date.now()); } // Extra safety
-        d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-        const dateStr = d.toISOString().split('T')[0]; // "YYYY-MM-DD"
-        if (!dailyMap[dateStr]) {
-            dailyMap[dateStr] = {
-                date: dateStr,
-                totalSeconds: 0,
-                untaggedSeconds: 0,
-                subjects: {}
-            };
-        }
-        
-        dailyMap[dateStr].totalSeconds += session.duration;
-        
-        if (!session.subject) {
-            dailyMap[dateStr].untaggedSeconds += session.duration;
-        } else {
-            const sid = session.subject.toString();
-            if (!dailyMap[dateStr].subjects[sid]) {
-                dailyMap[dateStr].subjects[sid] = {
-                    _id: sid,
-                    name: subjectMap[sid]?.name || 'Unknown',
-                    icon: subjectMap[sid]?.icon || '📚',
-                    color: subjectMap[sid]?.color || '#ec4899',
-                    totalStudySeconds: 0,
-                    chapters: {}
-                };
-            }
-            dailyMap[dateStr].subjects[sid].totalStudySeconds += session.duration;
+    const allTimeSubjectsMap = {};
+    let allTimeTotal = 0;
+    let allTimeUntagged = 0;
 
-            if (session.chapter) {
-                const cid = session.chapter.toString();
-                if (!dailyMap[dateStr].subjects[sid].chapters[cid]) {
-                     dailyMap[dateStr].subjects[sid].chapters[cid] = {
-                         _id: cid,
-                         name: chapterMap[cid] || 'Unknown',
-                         totalStudySeconds: 0
-                     };
-                }
-                dailyMap[dateStr].subjects[sid].chapters[cid].totalStudySeconds += session.duration;
+    daily.forEach(item => {
+      const { date, subject, chapter } = item._id;
+      const duration = item.duration;
+
+      // Group into daily structure
+      if (!dailyMap[date]) {
+        dailyMap[date] = { date, totalSeconds: 0, untaggedSeconds: 0, subjects: {} };
+      }
+      dailyMap[date].totalSeconds += duration;
+
+      // Process All-Time totals simultaneously
+      allTimeTotal += duration;
+
+      if (!subject) {
+        dailyMap[date].untaggedSeconds += duration;
+        allTimeUntagged += duration;
+      } else {
+        const sid = subject.toString();
+        
+        // Helper to ensure subject exists in a map
+        const ensureSubject = (map, id) => {
+          if (!map[id]) {
+            const meta = subjectMap[id];
+            map[id] = {
+              _id: id,
+              name: meta?.name || 'Unknown',
+              icon: meta?.icon || '📚',
+              color: meta?.color || '#ec4899',
+              totalStudySeconds: 0,
+              untaggedChapterSeconds: 0,
+              chapters: {}
+            };
+          }
+        };
+
+        ensureSubject(dailyMap[date].subjects, sid);
+        ensureSubject(allTimeSubjectsMap, sid);
+
+        dailyMap[date].subjects[sid].totalStudySeconds += duration;
+        allTimeSubjectsMap[sid].totalStudySeconds += duration;
+
+        if (chapter) {
+          const cid = chapter.toString();
+          const ensureChapter = (subObj, id) => {
+            if (!subObj.chapters[id]) {
+              subObj.chapters[id] = { _id: id, name: chapterMap[id] || 'Unknown', totalStudySeconds: 0 };
             }
+          };
+
+          ensureChapter(dailyMap[date].subjects[sid], cid);
+          ensureChapter(allTimeSubjectsMap[sid], cid);
+
+          dailyMap[date].subjects[sid].chapters[cid].totalStudySeconds += duration;
+          allTimeSubjectsMap[sid].chapters[cid].totalStudySeconds += duration;
+        } else {
+          dailyMap[date].subjects[sid].untaggedChapterSeconds += duration;
+          allTimeSubjectsMap[sid].untaggedChapterSeconds += duration;
         }
+      }
     });
 
-    const resultDaily = Object.values(dailyMap).map(day => {
-        const subjectsArray = Object.values(day.subjects).map(s => {
-           return { 
-               ...s, 
-               chapters: Object.values(s.chapters).sort((a,b) => b.totalStudySeconds - a.totalStudySeconds) 
-           };
-        }).sort((a,b) => b.totalStudySeconds - a.totalStudySeconds);
+    // 4. Transform maps to final arrays for the frontend
+    const resultDaily = Object.values(dailyMap).map(day => ({
+      ...day,
+      subjects: Object.values(day.subjects)
+        .sort((a,b) => b.totalStudySeconds - a.totalStudySeconds)
+        .map(s => ({
+          ...s,
+          chapters: Object.values(s.chapters).sort((a,b) => b.totalStudySeconds - a.totalStudySeconds)
+        }))
+    })).sort((a,b) => b.date.localeCompare(a.date));
 
+    const resultAllTime = {
+      totalSeconds: allTimeTotal,
+      untaggedSeconds: allTimeUntagged,
+      subjects: Object.values(allTimeSubjectsMap)
+        .sort((a,b) => b.totalStudySeconds - a.totalStudySeconds)
+        .map(s => ({
+          ...s,
+          chapters: Object.values(s.chapters).sort((a,b) => b.totalStudySeconds - a.totalStudySeconds)
+        }))
+    };
+
+    const resultSessions = rawSessions.map(session => {
+        const sid = session.subject?.toString();
+        const cid = session.chapter?.toString();
         return {
-           date: day.date,
-           totalSeconds: day.totalSeconds,
-           untaggedSeconds: day.untaggedSeconds,
-           subjects: subjectsArray
+            _id: session._id,
+            duration: session.duration,
+            startTime: session.startTime,
+            endTime: session.endTime,
+            subject: sid ? { _id: sid, name: subjectMap[sid]?.name || 'Unknown', icon: subjectMap[sid]?.icon || '📚' } : null,
+            chapter: cid ? { _id: cid, name: chapterMap[cid] || 'Unknown' } : null
         };
     });
 
-    // Sort descending by date
-    resultDaily.sort((a,b) => b.date.localeCompare(a.date));
-
-    // Calculate allTime
-    let allTimeTotal = 0;
-    let allTimeUntagged = 0;
-    const allTimeSubjectsMap = {};
-
-    sessions.forEach(session => {
-        allTimeTotal += session.duration;
-        if (!session.subject) {
-            allTimeUntagged += session.duration;
-        } else {
-            const sid = session.subject.toString();
-            if (!allTimeSubjectsMap[sid]) {
-                allTimeSubjectsMap[sid] = {
-                    _id: sid,
-                    name: subjectMap[sid]?.name || 'Unknown',
-                    icon: subjectMap[sid]?.icon || '📚',
-                    color: subjectMap[sid]?.color || '#ec4899',
-                    totalStudySeconds: 0,
-                    chapters: {}
-                };
-            }
-            allTimeSubjectsMap[sid].totalStudySeconds += session.duration;
-
-            if (session.chapter) {
-                const cid = session.chapter.toString();
-                if (!allTimeSubjectsMap[sid].chapters[cid]) {
-                     allTimeSubjectsMap[sid].chapters[cid] = {
-                         _id: cid,
-                         name: chapterMap[cid] || 'Unknown',
-                         totalStudySeconds: 0
-                     };
-                }
-                allTimeSubjectsMap[sid].chapters[cid].totalStudySeconds += session.duration;
-            }
-        }
-    });
-
-    const allTimeSubjectsArray = Object.values(allTimeSubjectsMap).map(s => {
-       return { 
-           ...s, 
-           chapters: Object.values(s.chapters).sort((a,b) => b.totalStudySeconds - a.totalStudySeconds) 
-       };
-    }).sort((a,b) => b.totalStudySeconds - a.totalStudySeconds);
-
     res.json({
-        allTime: {
-            totalSeconds: allTimeTotal,
-            untaggedSeconds: allTimeUntagged,
-            subjects: allTimeSubjectsArray
-        },
-        daily: resultDaily
+      allTime: resultAllTime,
+      daily: resultDaily,
+      sessions: resultSessions
     });
+
   } catch (error) {
-    require('fs').appendFileSync('timer-error.log', '\n' + new Date().toISOString() + '\n' + error.stack + '\n');
-    res.status(500).json({ message: error.message, stack: error.stack });
+    res.status(500).json({ message: error.message });
   }
 };
 
