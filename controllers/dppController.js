@@ -43,7 +43,7 @@ const getDPPs = async (req, res) => {
 
     const dpps = await DPP.find(filter)
       .populate('tags.subject tags.chapter tags.topic')
-      .sort({ date: -1 });
+      .sort({ createdAt: -1 });
 
     res.json(dpps);
   } catch (error) {

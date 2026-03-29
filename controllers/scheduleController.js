@@ -36,7 +36,7 @@ exports.uploadSchedule = async (req, res) => {
 exports.getSchedules = async (req, res) => {
     try {
         const schedules = await Schedule.find({ user: req.user.id })
-            .sort({ startDate: 1 }); // Sort by closest startDate
+            .sort({ createdAt: -1 }); 
             
         res.json(schedules);
     } catch (err) {

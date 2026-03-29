@@ -6,7 +6,7 @@ const getQuizSessions = async (req, res) => {
   try {
     const sessions = await QuizSession.find({ user: req.user._id })
       .populate('quizzes.subject quizzes.chapter quizzes.topic')
-      .sort({ date: -1 });
+      .sort({ createdAt: -1 });
     res.json(sessions);
   } catch (error) {
     res.status(500).json({ message: error.message });

@@ -45,7 +45,7 @@ const getRevisions = async (req, res) => {
 
     const revisions = await Revision.find(filter)
       .populate('tags.subject tags.chapter tags.topic')
-      .sort({ date: -1 });
+      .sort({ createdAt: -1 });
 
     res.json(revisions);
   } catch (error) {

@@ -9,7 +9,7 @@ const TestSeries = require('../models/TestSeries');
 // @route   GET /api/subjects
 const getSubjects = async (req, res) => {
   try {
-    const subjects = await Subject.find({ user: req.user._id });
+    const subjects = await Subject.find({ user: req.user._id }).sort({ createdAt: -1 });
 
     // Populate chapters and topics for each subject
     const fullSubjects = await Promise.all(subjects.map(async (subj) => {
