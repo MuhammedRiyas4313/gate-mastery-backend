@@ -17,7 +17,7 @@ exports.uploadSchedule = async (req, res) => {
         }
 
         const newSchedule = new Schedule({
-            user: req.user.id,
+            user: req.user._id,
             title,
             startDate: new Date(startDate),
             endDate: new Date(endDate),
@@ -35,19 +35,20 @@ exports.uploadSchedule = async (req, res) => {
 
 exports.getSchedules = async (req, res) => {
     try {
-        const schedules = await Schedule.find({ user: req.user.id })
+        const userId = req.user._id;
+        const schedules = await Schedule.find({ user: userId })
             .sort({ createdAt: -1 }); 
             
         res.json(schedules);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ message: 'Server error fetching schedules' });
+        res.status(500).json({ message: 'Server error fetching schedules', error: err.message });
     }
 };
 
 exports.deleteSchedule = async (req, res) => {
     try {
-        const schedule = await Schedule.findOne({ _id: req.params.id, user: req.user.id });
+        const schedule = await Schedule.findOne({ _id: req.params.id, user: req.user._id });
         if (!schedule) {
             return res.status(404).json({ message: 'Schedule not found' });
         }
