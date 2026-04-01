@@ -10,15 +10,12 @@ const TestSeries = require('../models/TestSeries');
 const QuizSession = require('../models/QuizSession');
 const Exam = require('../models/Exam');
 const { trackAttendance } = require('../utils/attendanceTracker');
-const { autoGenerateQuizSessions } = require('../utils/quizGenerator');
 
 const getDashboard = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user._id);
 
-    // 0. High-Priority: Ensure Quiz Sessions are Auto-Generated
-    await autoGenerateQuizSessions(userId);
-    
+
     // Set up IST-aware today and endOfToday
     const today = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
     today.setHours(0, 0, 0, 0);
@@ -40,8 +37,8 @@ const getDashboard = async (req, res) => {
                 from: 'exams',
                 let: { uId: userId },
                 pipeline: [
-                   { $match: { $expr: { $and: [{ $eq: ['$user', '$$uId'] }, { $eq: ['$active', true] }] } } },
-                   { $sort: { date: 1 } }
+                  { $match: { $expr: { $and: [{ $eq: ['$user', '$$uId'] }, { $eq: ['$active', true] }] } } },
+                  { $sort: { date: 1 } }
                 ],
                 as: 'exams'
               }
@@ -69,7 +66,7 @@ const getDashboard = async (req, res) => {
                 from: 'subjects',
                 let: { uId: userId },
                 pipeline: [
-                   { $match: { $expr: { $eq: ['$user', '$$uId'] } } }
+                  { $match: { $expr: { $eq: ['$user', '$$uId'] } } }
                 ],
                 as: 'subs'
               }
@@ -121,10 +118,16 @@ const getDashboard = async (req, res) => {
                 from: 'revisions',
                 let: { uId: userId },
                 pipeline: [
-                  { $match: { $expr: { $and: [
-                    { $eq: ['$user', '$$uId'] }, 
-                    { $in: ['$status', ['PENDING', 'ONGOING', 'SNOOZED']] }
-                  ] } } }
+                  {
+                    $match: {
+                      $expr: {
+                        $and: [
+                          { $eq: ['$user', '$$uId'] },
+                          { $in: ['$status', ['PENDING', 'ONGOING', 'SNOOZED']] }
+                        ]
+                      }
+                    }
+                  }
                 ],
                 as: 'revisions'
               }
@@ -134,10 +137,16 @@ const getDashboard = async (req, res) => {
                 from: 'dpps',
                 let: { uId: userId },
                 pipeline: [
-                  { $match: { $expr: { $and: [
-                    { $eq: ['$user', '$$uId'] }, 
-                    { $in: ['$status', ['PENDING', 'ONGOING']] }
-                  ] } } }
+                  {
+                    $match: {
+                      $expr: {
+                        $and: [
+                          { $eq: ['$user', '$$uId'] },
+                          { $in: ['$status', ['PENDING', 'ONGOING']] }
+                        ]
+                      }
+                    }
+                  }
                 ],
                 as: 'dpps'
               }
@@ -147,10 +156,16 @@ const getDashboard = async (req, res) => {
                 from: 'pyqs',
                 let: { uId: userId },
                 pipeline: [
-                  { $match: { $expr: { $and: [
-                    { $eq: ['$user', '$$uId'] }, 
-                    { $ne: ['$status', 'COMPLETED'] }
-                  ] } } }
+                  {
+                    $match: {
+                      $expr: {
+                        $and: [
+                          { $eq: ['$user', '$$uId'] },
+                          { $ne: ['$status', 'COMPLETED'] }
+                        ]
+                      }
+                    }
+                  }
                 ],
                 as: 'pyqs'
               }
@@ -160,10 +175,16 @@ const getDashboard = async (req, res) => {
                 from: 'testseries',
                 let: { uId: userId },
                 pipeline: [
-                  { $match: { $expr: { $and: [
-                    { $eq: ['$user', '$$uId'] }, 
-                    { $in: ['$status', ['PENDING', 'ONGOING']] }
-                  ] } } }
+                  {
+                    $match: {
+                      $expr: {
+                        $and: [
+                          { $eq: ['$user', '$$uId'] },
+                          { $in: ['$status', ['PENDING', 'ONGOING']] }
+                        ]
+                      }
+                    }
+                  }
                 ],
                 as: 'tests'
               }
@@ -173,10 +194,16 @@ const getDashboard = async (req, res) => {
                 from: 'quizsessions',
                 let: { uId: userId },
                 pipeline: [
-                  { $match: { $expr: { $and: [
-                    { $eq: ['$user', '$$uId'] }, 
-                    { $in: ['$status', ['PENDING', 'ONGOING']] }
-                  ] } } }
+                  {
+                    $match: {
+                      $expr: {
+                        $and: [
+                          { $eq: ['$user', '$$uId'] },
+                          { $in: ['$status', ['PENDING', 'ONGOING']] }
+                        ]
+                      }
+                    }
+                  }
                 ],
                 as: 'quizSessions'
               }
@@ -187,11 +214,11 @@ const getDashboard = async (req, res) => {
                   $reduce: {
                     input: { $ifNull: ['$revisions', []] },
                     initialValue: 0,
-                    in: { 
-                       $add: [
-                          '$$value', 
-                          { $max: [1, { $size: { $ifNull: ['$$this.tags', []] } }] }
-                       ] 
+                    in: {
+                      $add: [
+                        '$$value',
+                        { $max: [1, { $size: { $ifNull: ['$$this.tags', []] } }] }
+                      ]
                     }
                   }
                 },
@@ -205,17 +232,17 @@ const getDashboard = async (req, res) => {
                       $reduce: {
                         input: { $ifNull: ['$revisions', []] },
                         initialValue: 0,
-                        in: { 
-                           $add: [
-                              '$$value', 
-                              { $max: [1, { $size: { $ifNull: ['$$this.tags', []] } }] }
-                           ] 
+                        in: {
+                          $add: [
+                            '$$value',
+                            { $max: [1, { $size: { $ifNull: ['$$this.tags', []] } }] }
+                          ]
                         }
                       }
-                    }, 
-                    { $size: { $ifNull: ['$dpps', []] } }, 
-                    { $size: { $ifNull: ['$pyqs', []] } }, 
-                    { $size: { $ifNull: ['$tests', []] } }, 
+                    },
+                    { $size: { $ifNull: ['$dpps', []] } },
+                    { $size: { $ifNull: ['$pyqs', []] } },
+                    { $size: { $ifNull: ['$tests', []] } },
                     { $size: { $ifNull: ['$quizSessions', []] } }
                   ]
                 }
@@ -261,7 +288,7 @@ const getDashboard = async (req, res) => {
             { $replaceRoot: { newRoot: '$todaysTopics' } }
           ],
 
-          user: [ { $project: { name: 1, email: 1 } } ]
+          user: [{ $project: { name: 1, email: 1 } }]
         }
       }
     ]);
@@ -308,7 +335,7 @@ const getDashboard = async (req, res) => {
       topicsCompletedToday: dashboardData?.topicsCompletedToday || [],
       user: dashboardData?.user[0] || { name: 'Commander' },
       activityHeatmap,
-      
+
       revisionsToday: await Revision.find({ user: userId, date: { $lte: endOfToday }, status: { $in: ['PENDING', 'ONGOING', 'SNOOZED'] } }).limit(10).populate('tags.subject tags.chapter tags.topic'),
       dppsToday: await DPP.find({ user: userId, date: { $lte: endOfToday }, status: { $in: ['PENDING', 'ONGOING'] } }).limit(5).populate('tags.subject tags.chapter tags.topic'),
       pyqsToday: await PYQ.find({ user: userId, $or: [{ date: { $lte: endOfToday }, status: { $ne: 'COMPLETED' } }, { updatedAt: { $gte: today, $lte: endOfToday } }] }).limit(5).populate('subject chapter topic'),
