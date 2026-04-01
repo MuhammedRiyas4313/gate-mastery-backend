@@ -5,7 +5,7 @@ const Chapter = require('../models/Chapter');
 // @desc    Save a completed study session
 // @route   POST /api/timer/session
 const saveSession = async (req, res) => {
-  const { subjectId, chapterId, duration, startTime, endTime } = req.body;
+  const { subjectId, chapterId, duration, startTime, endTime, activityType } = req.body;
 
   try {
     // Save the study session (subjectId and chapterId are optional)
@@ -15,7 +15,8 @@ const saveSession = async (req, res) => {
       chapter: (chapterId && chapterId.trim() !== "") ? chapterId : null,
       duration,
       startTime,
-      endTime
+      endTime,
+      activityType: activityType || 'Lecture'
     });
 
     // Update totals
@@ -72,7 +73,8 @@ const getStats = async (req, res) => {
                 _id: {
                   date: { $dateToString: { format: "%Y-%m-%d", date: "$startTime", timezone: "+05:30" } },
                   subject: "$subject",
-                  chapter: "$chapter"
+                  chapter: "$chapter",
+                  activityType: "$activityType"
                 },
                 duration: { $sum: "$duration" }
               }
@@ -93,6 +95,8 @@ const getStats = async (req, res) => {
     // 3. Process Daily and AllTime stats
     const dailyMap = {};
     const allTimeSubjectsMap = {};
+    const allTimeActivitiesMap = {};
+    const allTimeUntaggedActivitiesMap = {};
     let allTimeTotal = 0;
     let allTimeUntagged = 0;
 
@@ -102,19 +106,34 @@ const getStats = async (req, res) => {
 
       // Group into daily structure
       if (!dailyMap[date]) {
-        dailyMap[date] = { date, totalSeconds: 0, untaggedSeconds: 0, subjects: {} };
+        dailyMap[date] = { date, totalSeconds: 0, untaggedSeconds: 0, subjects: {}, activities: {} };
       }
       dailyMap[date].totalSeconds += duration;
 
       // Process All-Time totals simultaneously
       allTimeTotal += duration;
 
+      // Accumulate activity stats (daily and all-time)
+      const act = item._id.activityType || 'Lecture';
+      if (!dailyMap[date].activities[act]) dailyMap[date].activities[act] = 0;
+      dailyMap[date].activities[act] += duration;
+
+      if (!allTimeActivitiesMap[act]) allTimeActivitiesMap[act] = 0;
+      allTimeActivitiesMap[act] += duration;
+
       if (!subject) {
         dailyMap[date].untaggedSeconds += duration;
         allTimeUntagged += duration;
+
+        if (!dailyMap[date].untaggedActivities) dailyMap[date].untaggedActivities = {};
+        if (!dailyMap[date].untaggedActivities[act]) dailyMap[date].untaggedActivities[act] = 0;
+        dailyMap[date].untaggedActivities[act] += duration;
+
+        if (!allTimeUntaggedActivitiesMap[act]) allTimeUntaggedActivitiesMap[act] = 0;
+        allTimeUntaggedActivitiesMap[act] += duration;
       } else {
         const sid = subject.toString();
-        
+
         // Helper to ensure subject exists in a map
         const ensureSubject = (map, id) => {
           if (!map[id]) {
@@ -126,7 +145,9 @@ const getStats = async (req, res) => {
               color: meta?.color || '#ec4899',
               totalStudySeconds: 0,
               untaggedChapterSeconds: 0,
-              chapters: {}
+              chapters: {},
+              activities: {},
+              untaggedChapterActivities: {}
             };
           }
         };
@@ -137,11 +158,16 @@ const getStats = async (req, res) => {
         dailyMap[date].subjects[sid].totalStudySeconds += duration;
         allTimeSubjectsMap[sid].totalStudySeconds += duration;
 
+        if (!dailyMap[date].subjects[sid].activities[act]) dailyMap[date].subjects[sid].activities[act] = 0;
+        dailyMap[date].subjects[sid].activities[act] += duration;
+        if (!allTimeSubjectsMap[sid].activities[act]) allTimeSubjectsMap[sid].activities[act] = 0;
+        allTimeSubjectsMap[sid].activities[act] += duration;
+
         if (chapter) {
           const cid = chapter.toString();
           const ensureChapter = (subObj, id) => {
             if (!subObj.chapters[id]) {
-              subObj.chapters[id] = { _id: id, name: chapterMap[id] || 'Unknown', totalStudySeconds: 0 };
+              subObj.chapters[id] = { _id: id, name: chapterMap[id] || 'Unknown', totalStudySeconds: 0, activities: {} };
             }
           };
 
@@ -150,9 +176,19 @@ const getStats = async (req, res) => {
 
           dailyMap[date].subjects[sid].chapters[cid].totalStudySeconds += duration;
           allTimeSubjectsMap[sid].chapters[cid].totalStudySeconds += duration;
+
+          if (!dailyMap[date].subjects[sid].chapters[cid].activities[act]) dailyMap[date].subjects[sid].chapters[cid].activities[act] = 0;
+          dailyMap[date].subjects[sid].chapters[cid].activities[act] += duration;
+          if (!allTimeSubjectsMap[sid].chapters[cid].activities[act]) allTimeSubjectsMap[sid].chapters[cid].activities[act] = 0;
+          allTimeSubjectsMap[sid].chapters[cid].activities[act] += duration;
         } else {
           dailyMap[date].subjects[sid].untaggedChapterSeconds += duration;
           allTimeSubjectsMap[sid].untaggedChapterSeconds += duration;
+
+          if (!dailyMap[date].subjects[sid].untaggedChapterActivities[act]) dailyMap[date].subjects[sid].untaggedChapterActivities[act] = 0;
+          dailyMap[date].subjects[sid].untaggedChapterActivities[act] += duration;
+          if (!allTimeSubjectsMap[sid].untaggedChapterActivities[act]) allTimeSubjectsMap[sid].untaggedChapterActivities[act] = 0;
+          allTimeSubjectsMap[sid].untaggedChapterActivities[act] += duration;
         }
       }
     });
@@ -161,35 +197,38 @@ const getStats = async (req, res) => {
     const resultDaily = Object.values(dailyMap).map(day => ({
       ...day,
       subjects: Object.values(day.subjects)
-        .sort((a,b) => b.totalStudySeconds - a.totalStudySeconds)
+        .sort((a, b) => b.totalStudySeconds - a.totalStudySeconds)
         .map(s => ({
           ...s,
-          chapters: Object.values(s.chapters).sort((a,b) => b.totalStudySeconds - a.totalStudySeconds)
+          chapters: Object.values(s.chapters).sort((a, b) => b.totalStudySeconds - a.totalStudySeconds)
         }))
-    })).sort((a,b) => b.date.localeCompare(a.date));
+    })).sort((a, b) => b.date.localeCompare(a.date));
 
     const resultAllTime = {
       totalSeconds: allTimeTotal,
       untaggedSeconds: allTimeUntagged,
+      activities: allTimeActivitiesMap,
+      untaggedActivities: allTimeUntaggedActivitiesMap,
       subjects: Object.values(allTimeSubjectsMap)
-        .sort((a,b) => b.totalStudySeconds - a.totalStudySeconds)
+        .sort((a, b) => b.totalStudySeconds - a.totalStudySeconds)
         .map(s => ({
           ...s,
-          chapters: Object.values(s.chapters).sort((a,b) => b.totalStudySeconds - a.totalStudySeconds)
+          chapters: Object.values(s.chapters).sort((a, b) => b.totalStudySeconds - a.totalStudySeconds)
         }))
     };
 
     const resultSessions = rawSessions.map(session => {
-        const sid = session.subject?.toString();
-        const cid = session.chapter?.toString();
-        return {
-            _id: session._id,
-            duration: session.duration,
-            startTime: session.startTime,
-            endTime: session.endTime,
-            subject: sid ? { _id: sid, name: subjectMap[sid]?.name || 'Unknown', icon: subjectMap[sid]?.icon || '📚' } : null,
-            chapter: cid ? { _id: cid, name: chapterMap[cid] || 'Unknown' } : null
-        };
+      const sid = session.subject?.toString();
+      const cid = session.chapter?.toString();
+      return {
+        _id: session._id,
+        duration: session.duration,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        activityType: session.activityType,
+        subject: sid ? { _id: sid, name: subjectMap[sid]?.name || 'Unknown', icon: subjectMap[sid]?.icon || '📚' } : null,
+        chapter: cid ? { _id: cid, name: chapterMap[cid] || 'Unknown' } : null
+      };
     });
 
     res.json({

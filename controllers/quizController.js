@@ -2,7 +2,13 @@ const Quiz = require('../models/Quiz');
 
 const getQuizzes = async (req, res) => {
   try {
-    const quizzes = await Quiz.find({ user: req.user._id }).populate('subject').sort({ createdAt: -1 });
+    const { sortBy } = req.query;
+    let sortObj = { createdAt: -1 };
+    if (sortBy === 'date') {
+      sortObj = { date: -1 };
+    }
+
+    const quizzes = await Quiz.find({ user: req.user._id }).populate('subject').sort(sortObj);
     res.json(quizzes);
   } catch (error) {
     res.status(500).json({ message: error.message });

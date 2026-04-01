@@ -4,7 +4,7 @@ const TestSeries = require('../models/TestSeries');
 // @route   GET /api/test-series
 const getTestSeries = async (req, res) => {
   try {
-    const { status, subjectId, chapterId, type } = req.query;
+    const { status, subjectId, chapterId, type, sortBy } = req.query;
 
     const filter = { user: req.user._id };
 
@@ -13,9 +13,14 @@ const getTestSeries = async (req, res) => {
     if (chapterId && chapterId !== 'all') filter.chapter = chapterId;
     if (type && type !== 'all') filter.type = type;
 
+    let sortObj = { createdAt: -1 };
+    if (sortBy === 'date') {
+      sortObj = { date: -1 };
+    }
+
     const tests = await TestSeries.find(filter)
       .populate('subject chapter')
-      .sort({ createdAt: -1 });
+      .sort(sortObj);
     res.json(tests);
   } catch (error) {
     res.status(500).json({ message: error.message });

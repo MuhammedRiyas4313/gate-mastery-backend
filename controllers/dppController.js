@@ -4,7 +4,7 @@ const DPP = require('../models/DPP');
 // @route   GET /api/dpp
 const getDPPs = async (req, res) => {
   try {
-    const { status, subjectId, chapterId } = req.query;
+    const { status, subjectId, chapterId, sortBy } = req.query;
 
     // Ensure today's DPP exists (IST-aware)
     const now = new Date();
@@ -41,9 +41,14 @@ const getDPPs = async (req, res) => {
       filter.tags = { $elemMatch: tagMatch };
     }
 
+    let sortObj = { createdAt: -1 };
+    if (sortBy === 'date') {
+      sortObj = { date: -1 };
+    }
+
     const dpps = await DPP.find(filter)
       .populate('tags.subject tags.chapter tags.topic')
-      .sort({ createdAt: -1 });
+      .sort(sortObj);
 
     res.json(dpps);
   } catch (error) {

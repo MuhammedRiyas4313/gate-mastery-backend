@@ -7,6 +7,11 @@ const studySessionSchema = new mongoose.Schema({
   duration: { type: Number, required: true }, // in seconds
   startTime: { type: Date, required: true },
   endTime: { type: Date, required: true },
+  activityType: {
+    type: String,
+    enum: ['Lecture', 'Revision', 'PYQ', 'Quiz', 'DPP', 'Test Series'],
+    default: 'Lecture'
+  },
   status: { type: String, enum: ['COMPLETED'], default: 'COMPLETED' }
 }, { timestamps: true });
 

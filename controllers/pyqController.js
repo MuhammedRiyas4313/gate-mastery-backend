@@ -4,7 +4,7 @@ const PYQ = require('../models/PYQ');
 // @route   GET /api/pyqs
 const getPYQs = async (req, res) => {
   try {
-    const { status, subjectId, chapterId } = req.query;
+    const { status, subjectId, chapterId, sortBy } = req.query;
 
     const filter = { user: req.user._id };
 
@@ -18,9 +18,14 @@ const getPYQs = async (req, res) => {
       filter.chapter = chapterId;
     }
 
+    let sortObj = { createdAt: -1 };
+    if (sortBy === 'date') {
+      sortObj = { date: -1 };
+    }
+
     const pyqs = await PYQ.find(filter)
       .populate('subject chapter topic')
-      .sort({ createdAt: -1 });
+      .sort(sortObj);
     res.json(pyqs);
   } catch (error) {
     res.status(500).json({ message: error.message });

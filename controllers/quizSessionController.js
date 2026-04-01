@@ -4,9 +4,15 @@ const QuizSession = require('../models/QuizSession');
 // @route   GET /api/quiz-sessions
 const getQuizSessions = async (req, res) => {
   try {
+    const { sortBy } = req.query;
+    let sortObj = { createdAt: -1 };
+    if (sortBy === 'date') {
+      sortObj = { date: -1 };
+    }
+
     const sessions = await QuizSession.find({ user: req.user._id })
       .populate('quizzes.subject quizzes.chapter quizzes.topic')
-      .sort({ createdAt: -1 });
+      .sort(sortObj);
     res.json(sessions);
   } catch (error) {
     res.status(500).json({ message: error.message });

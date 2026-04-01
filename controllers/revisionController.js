@@ -4,7 +4,7 @@ const Revision = require('../models/Revision');
 // @route   GET /api/revisions
 const getRevisions = async (req, res) => {
   try {
-    const { status, subjectId, chapterId } = req.query;
+    const { status, subjectId, chapterId, sortBy } = req.query;
 
     // Ensure today's DAILY revision exists (IST-aware)
     const now = new Date();
@@ -43,9 +43,14 @@ const getRevisions = async (req, res) => {
       filter.tags = { $elemMatch: tagMatch };
     }
 
+    let sortObj = { createdAt: -1 };
+    if (sortBy === 'date') {
+      sortObj = { date: -1 };
+    }
+
     const revisions = await Revision.find(filter)
       .populate('tags.subject tags.chapter tags.topic')
-      .sort({ createdAt: -1 });
+      .sort(sortObj);
 
     res.json(revisions);
   } catch (error) {
