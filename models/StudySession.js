@@ -9,7 +9,7 @@ const studySessionSchema = new mongoose.Schema({
   endTime: { type: Date, required: true },
   activityType: {
     type: String,
-    enum: ['Lecture', 'Revision', 'PYQ', 'Quiz', 'DPP', 'Test Series'],
+    enum: ['Lecture', 'Revision', 'PYQ', 'Quiz', 'DPP', 'Test Series', 'Question Practising'],
     default: 'Lecture'
   },
   status: { type: String, enum: ['COMPLETED'], default: 'COMPLETED' }
