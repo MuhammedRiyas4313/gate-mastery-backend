@@ -4,89 +4,87 @@ const Revision = require('../models/Revision');
 const QuizSession = require('../models/QuizSession');
 
 /**
- * Core engine to generate daily tasks for all users.
- * This can be triggered by node-cron (local) or a Vercel Cron job (HTTP).
+ * Sync daily tasks for a specific user today.
+ * Handles DPP, Revisions, and Quiz Sessions based on user activity and date.
  */
-const runDailyTaskGeneration = async () => {
-    console.log('[TaskEngine] Initiating daily generation sequence...');
-    
-    const users = await User.find({});
-    const now = new Date();
-    const istDateStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // "YYYY-MM-DD"
-    const today = new Date(istDateStr);
-    today.setHours(0, 0, 0, 0);
+const syncUserDailyTasks = async (userId) => {
+    try {
+        const user = await User.findById(userId);
+        if (!user) return null;
 
-    // Get the correct day of week in IST to determine if it's Quiz time (Saturday/Sunday)
-    const istDayStr = now.toLocaleDateString("en-US", { weekday: 'long', timeZone: "Asia/Kolkata" });
-    const dayNumMap = { 'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6 };
-    const dayNum = dayNumMap[istDayStr];
+        const now = new Date();
+        const istDateStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // "YYYY-MM-DD"
+        const today = new Date(istDateStr);
+        today.setHours(0, 0, 0, 0);
 
-    const stats = {
-        usersProcessed: 0,
-        dppsCreated: 0,
-        revisionsCreated: 0,
-        quizzesCreated: 0
-    };
+        const istDayOfWeek = now.toLocaleDateString("en-US", { weekday: 'long', timeZone: "Asia/Kolkata" });
+        const dayMap = { 'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6 };
+        const dayNum = dayMap[istDayOfWeek];
 
-    for (const user of users) {
-        stats.usersProcessed++;
-        
-        // 1. Generate DPP
-        const dppExists = await DPP.findOne({
-            user: user._id,
-            date: { $gte: today }
-        });
+        let updated = false;
 
-        if (!dppExists) {
-            await DPP.create({
-                user: user._id,
-                date: today,
-                status: 'PENDING'
-            });
-            stats.dppsCreated++;
-        }
-
-        // 1.5 Generate Daily Revision
-        const revExists = await Revision.findOne({
-            user: user._id,
-            date: { $gte: today },
-            type: 'DAILY'
-        });
-
-        if (!revExists) {
-            await Revision.create({
-                user: user._id,
-                date: today,
-                type: 'DAILY',
-                status: 'PENDING'
-            });
-            stats.revisionsCreated++;
-        }
-
-        // 2. Generate Weekly Quiz Session if Saturday (6) or Sunday (0)
-        if (dayNum === 6 || dayNum === 0) {
-            const dayName = dayNum === 6 ? 'Saturday' : 'Sunday';
-            const sessionExists = await QuizSession.findOne({
-                user: user._id,
-                date: { $gte: today },
-                dayName: dayName
-            });
-
-            if (!sessionExists) {
-                await QuizSession.create({
-                    user: user._id,
-                    date: today,
-                    dayName: dayName,
-                    status: 'PENDING',
-                    quizzes: []
-                });
-                stats.quizzesCreated++;
+        // --- 1. DPP GENERATION ---
+        // Requirement: Skip on Sunday. Only create if not already generated.
+        const dppKey = `${istDateStr}:DPP`;
+        if (dayNum !== 0 && !user.generatedTasks.includes(dppKey)) {
+            // Check if DPP exists in DB (might have been created but not in history yet)
+            const dppInDb = await DPP.findOne({ user: userId, date: today });
+            if (!dppInDb) {
+                await DPP.create({ user: userId, date: today, status: 'PENDING' });
             }
+            user.generatedTasks.push(dppKey);
+            updated = true;
         }
-    }
 
-    console.log(`[TaskEngine] Sequence completed:`, stats);
-    return stats;
+        // --- 2. REVISION GENERATION ---
+        // Requirement: Only create if not already generated.
+        const revKey = `${istDateStr}:REVISION`;
+        if (!user.generatedTasks.includes(revKey)) {
+            const revInDb = await Revision.findOne({ user: userId, date: today, type: 'DAILY' });
+            if (!revInDb) {
+                await Revision.create({ user: userId, date: today, type: 'DAILY', status: 'PENDING' });
+            }
+            user.generatedTasks.push(revKey);
+            updated = true;
+        }
+
+        // --- 3. QUIZ SESSION GENERATION ---
+        // Only auto-create if user logs in on Saturday or Sunday.
+        // If Saturday: create Saturday quiz; If Sunday: create Sunday quiz.
+        if (dayNum === 6) { // Saturday
+            await createQuizIfMissing(user, istDateStr, today, 'Saturday');
+        } else if (dayNum === 0) { // Sunday
+            await createQuizIfMissing(user, istDateStr, today, 'Sunday');
+        }
+
+        // Update user history if any new tasks were generated
+        if (updated || user.isModified('generatedTasks')) {
+            await user.save();
+        }
+
+        return { success: true, istDateStr };
+    } catch (error) {
+        console.error(`[TaskEngine] Sync failed for user ${userId}:`, error);
+        return null;
+    }
 };
 
-module.exports = { runDailyTaskGeneration };
+/** Helper to create quiz session and track history */
+const createQuizIfMissing = async (user, dateStr, dateObj, dayName) => {
+    const quizKey = `${dateStr}:${dayName}:QUIZ`;
+    if (!user.generatedTasks.includes(quizKey)) {
+        const quizExists = await QuizSession.findOne({ user: user._id, date: dateObj, dayName: dayName });
+        if (!quizExists) {
+            await QuizSession.create({
+                user: user._id,
+                date: dateObj,
+                dayName: dayName,
+                status: 'PENDING',
+                quizzes: []
+            });
+        }
+        user.generatedTasks.push(quizKey);
+    }
+};
+
+module.exports = { syncUserDailyTasks };

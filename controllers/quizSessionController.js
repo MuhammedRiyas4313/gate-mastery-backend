@@ -1,9 +1,11 @@
 const QuizSession = require('../models/QuizSession');
+const { syncUserDailyTasks } = require('../utils/dailyTaskEngine');
 
 // @desc    Get all quiz sessions
 // @route   GET /api/quiz-sessions
 const getQuizSessions = async (req, res) => {
   try {
+    await syncUserDailyTasks(req.user._id);
     const { sortBy } = req.query;
     let sortObj = { createdAt: -1 };
     if (sortBy === 'date') {

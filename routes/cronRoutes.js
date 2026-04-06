@@ -1,10 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const { runDailyTaskGeneration } = require('../utils/dailyTaskEngine');
 
 /**
  * @route   POST /api/cron/daily
- * @desc    Triggers the generation of daily DPPs, Revisions, and Quiz Sessions.
+ * @desc    Check (No longer active - tasks are sync'd on login/navigation)
  * @access  Private (Cron secret)
  */
 router.post('/daily', async (req, res) => {
@@ -17,11 +16,9 @@ router.post('/daily', async (req, res) => {
     }
 
     try {
-        const stats = await runDailyTaskGeneration();
         res.status(200).json({ 
             success: true, 
-            message: 'Daily generation sequence executed successfully.',
-            stats 
+            message: 'Cron triggered (Tasks are now handled on user navigation).'
         });
     } catch (error) {
         console.error('[CronRouteError] Execute failed:', error);

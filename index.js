@@ -19,7 +19,7 @@ app.use('/uploads', express.static('uploads'));
 app.use('/api/uploads', express.static('uploads')); // accommodate frontend base URIs
 
 app.get('/', (req, res) => {
-  res.send('GATE Mastery API is running...');
+  res.send('Dream Track API is running...');
 });
 
 // Import routes

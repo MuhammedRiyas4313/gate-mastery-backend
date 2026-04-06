@@ -10,10 +10,14 @@ const TestSeries = require('../models/TestSeries');
 const QuizSession = require('../models/QuizSession');
 const Exam = require('../models/Exam');
 const { trackAttendance } = require('../utils/attendanceTracker');
+const { syncUserDailyTasks } = require('../utils/dailyTaskEngine');
 
 const getDashboard = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user._id);
+
+    // Sync daily tasks on login/dashboard load
+    await syncUserDailyTasks(userId);
 
 
     // Set up IST-aware today and endOfToday

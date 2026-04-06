@@ -1,9 +1,11 @@
 const DPP = require('../models/DPP');
+const { syncUserDailyTasks } = require('../utils/dailyTaskEngine');
 
 // @desc    Get all DPPs for a user
 // @route   GET /api/dpp
 const getDPPs = async (req, res) => {
   try {
+    await syncUserDailyTasks(req.user._id);
     const { status, subjectId, chapterId, sortBy } = req.query;
 
     // Ensure today's DPP exists (IST-aware)
@@ -12,19 +14,6 @@ const getDPPs = async (req, res) => {
     const startOfToday = new Date(istDateStr);
     const endOfToday = new Date(istDateStr);
     endOfToday.setHours(23, 59, 59, 999);
-
-    const todayDPP = await DPP.findOne({
-      user: req.user._id,
-      date: { $gte: startOfToday, $lte: endOfToday }
-    });
-
-    if (!todayDPP) {
-      await DPP.create({
-        user: req.user._id,
-        date: startOfToday,
-        status: 'PENDING'
-      });
-    }
 
     // Build dynamic filter
     const filter = { user: req.user._id };
