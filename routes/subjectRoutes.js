@@ -4,7 +4,7 @@ const {
   getSubjects, addSubject, updateSubject, deleteSubject,
   addChapter, updateChapter, deleteChapter,
   addTopic, updateTopic, deleteTopic,
-  getChapters
+  getChapters, getSubjectDetails
 } = require('../controllers/subjectController');
 const { protect } = require('../middleware/auth');
 
@@ -12,6 +12,7 @@ router.get('/', protect, getSubjects);
 router.post('/', protect, addSubject);
 router.put('/:id', protect, updateSubject);
 router.delete('/:id', protect, deleteSubject);
+router.get('/:id/details', protect, getSubjectDetails);
 
 router.post('/:subjectId/chapters', protect, addChapter);
 router.put('/chapters/:id', protect, updateChapter);

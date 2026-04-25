@@ -1,8 +1,20 @@
 const express = require('express');
 const router = express.Router();
-const { getPlannerData } = require('../controllers/plannerController');
+const { 
+  getTodos, 
+  getTodoSummary, 
+  createTodo, 
+  updateTodo, 
+  deleteTodo 
+} = require('../controllers/todoController');
 const { protect } = require('../middleware/auth');
 
-router.get('/', protect, getPlannerData);
+router.use(protect);
+
+router.get('/todos', getTodos);
+router.get('/summary', getTodoSummary);
+router.post('/todos', createTodo);
+router.put('/todos/:id', updateTodo);
+router.delete('/todos/:id', deleteTodo);
 
 module.exports = router;

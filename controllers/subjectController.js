@@ -4,6 +4,8 @@ const Topic = require('../models/Topic');
 const Revision = require('../models/Revision');
 const PYQ = require('../models/PYQ');
 const TestSeries = require('../models/TestSeries');
+const DPP = require('../models/DPP');
+const QuizSession = require('../models/QuizSession');
 
 // @desc    Get all subjects for a user
 // @route   GET /api/subjects
@@ -203,9 +205,47 @@ const getChapters = async (req, res) => {
   }
 };
 
+const getSubjectDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+
+    const subject = await Subject.findById(id);
+    if (!subject) return res.status(404).json({ message: 'Subject not found' });
+
+    const chapters = await Chapter.find({ subject: id }).sort({ orderIndex: 1 });
+    const chapterIds = chapters.map(c => c._id);
+
+    const topics = await Topic.find({ subject: id }).sort({ dateTaught: -1 }).populate('chapter');
+    
+    const [revisions, dpps, pyqs, tests, quizzes] = await Promise.all([
+      Revision.find({ user: userId, 'tags.subject': id }).populate('tags.chapter tags.topic'),
+      DPP.find({ user: userId, 'tags.subject': id }).populate('tags.chapter tags.topic'),
+      PYQ.find({ user: userId, subject: id }).populate('chapter'),
+      TestSeries.find({ user: userId, subject: id }).populate('chapter'),
+      QuizSession.find({ user: userId, 'quizzes.subject': id })
+    ]);
+
+    res.json({
+      subject,
+      chapters,
+      topics,
+      activities: {
+        revisions,
+        dpps,
+        pyqs,
+        tests,
+        quizzes
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getSubjects, addSubject, updateSubject, deleteSubject,
   addChapter, updateChapter, deleteChapter,
   addTopic, updateTopic, deleteTopic,
-  getChapters
+  getChapters, getSubjectDetails
 };
