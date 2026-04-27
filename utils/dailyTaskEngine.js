@@ -36,17 +36,9 @@ const syncUserDailyTasks = async (userId) => {
             updated = true;
         }
 
-        // --- 2. REVISION GENERATION ---
-        // Requirement: Only create if not already generated.
-        const revKey = `${istDateStr}:REVISION`;
-        if (!user.generatedTasks.includes(revKey)) {
-            const revInDb = await Revision.findOne({ user: userId, date: today, type: 'DAILY' });
-            if (!revInDb) {
-                await Revision.create({ user: userId, date: today, type: 'DAILY', status: 'PENDING' });
-            }
-            user.generatedTasks.push(revKey);
-            updated = true;
-        }
+        // --- 2. REVISION GENERATION (REMOVED) ---
+        // Daily revision document creation is no longer required as per user request.
+
 
         // --- 3. QUIZ SESSION GENERATION ---
         // Only auto-create if user logs in on Saturday or Sunday.

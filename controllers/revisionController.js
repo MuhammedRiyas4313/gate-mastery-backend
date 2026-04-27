@@ -8,13 +8,6 @@ const getRevisions = async (req, res) => {
     await syncUserDailyTasks(req.user._id);
     const { status, subjectId, chapterId, sortBy } = req.query;
 
-    // Ensure today's DAILY revision exists (IST-aware)
-    const now = new Date();
-    const istDateStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-    const startOfToday = new Date(istDateStr);
-    const endOfToday = new Date(istDateStr);
-    endOfToday.setHours(23, 59, 59, 999);
-
     // Build dynamic filter
     const filter = { user: req.user._id };
 
